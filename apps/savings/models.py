@@ -7,6 +7,7 @@ class Meeting(models.Model):
     meeting_type = models.CharField(max_length=10, default='Money')
     minimum_contribution = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     is_complete = models.BooleanField(default=False)
+    minutes = models.TextField(blank=True, null=True) # <-- ADD THIS FOR READINGS
 
 class Contribution(models.Model):
     member = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -17,6 +18,6 @@ class Contribution(models.Model):
 class Fine(models.Model):
     member = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     meeting = models.ForeignKey(Meeting, on_delete=models.CASCADE)
-    amount = models.DecimalField(max_digits=10, decimal_places=2, default=500.00) # Default fine
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=500.00)
     reason = models.CharField(max_length=255, default="Absenteeism")
     is_paid = models.BooleanField(default=False)
