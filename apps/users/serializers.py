@@ -2,44 +2,58 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from .models import Member, Policy, UserPolicySignature
 
-# 1. Fix the MemberSerializer
+# 1. Member Serializer (Handles creating User + Member together)
 class MemberSerializer(serializers.ModelSerializer):
-    # These pull fields from the connected built-in User model
-    username = serializers.CharField(source='user.username', read_only=True)
-    email = serializers.EmailField(source='user.email', read_only=True)
-    
+    username = serializers.CharField(source='user.username')
+    email = serializers.EmailField(source='user.email')
+    password = serializers.CharField(write_only=True, source='user.password', required=True)
+
     class Meta:
         model = Member
         fields = [
-            'id', 
-            'username', 
-            'email', 
-            'name', 
-            'phone', 
-            'role', 
-            'dividend_preference'
+            'id', 'username', 'email', 'password', 
+            'name', 'phone', 'role', 'dividend_preference'
         ]
+
+    def create(self, validated_data):
+        user_data = validated_data.pop('user')
+        
+        try:
+            # 1. Create the built-in User
+            user = User.objects.create_user(**user_data)
+            
+            # 2. Create the Member profile linked to the User
+            member = Member.objects.create(user=user, **validated_data)
+            return member
+            
+        except IntegrityError:
+            # Catches duplicate usernames or emails
+            raise DRFValidationError({"username": "A user with this username or email already exists."})
+        except DjangoValidationError as e:
+            # Catches Django's password validators (e.g. "This password is too short")
+            raise DRFValidationError(e.message_dict if hasattr(e, 'message_dict') else e.messages)
+        except Exception as e:
+            # Catch any other unexpected errors
+            raise DRFValidationError(str(e))
 
 # 2. Custom Login Serializer (Allows Email or Username)
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
-        # The frontend sends the input as 'username'
         login_input = attrs.get('username')
         password = attrs.get('password')
 
-        # If the input contains '@', treat it as an email
         if '@' in login_input:
             try:
-                # Find the User by email
                 user_obj = User.objects.get(email=login_input)
-                # Swap the email for the actual username so SimpleJWT can authenticate it
                 attrs['username'] = user_obj.username
             except User.DoesNotExist:
                 raise serializers.ValidationError("No account found with this email.")
         
-        # Now authenticate with the resolved username
         user = authenticate(
             request=self.context.get('request'),
             username=attrs['username'],
@@ -49,23 +63,20 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if not user:
             raise serializers.ValidationError("Invalid credentials. Please try again.")
 
-        # Generate the token using the parent class
         refresh = self.get_token(user)
+        
+        # Return member data if they are a member, otherwise just basic info
+        try:
+            member_data = MemberSerializer(Member.objects.get(user=user)).data
+        except Member.DoesNotExist:
+            member_data = {'username': user.username, 'role': 'Super Admin'}
+
         data = {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
-            'user': MemberSerializer(Member.objects.get(user=user)).data
+            'user': member_data
         }
         return data
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    class Meta:
-        model = Member
-        fields = ['username', 'password', 'name', 'phone', 'role']
-
-    def create(self, validated_data):
-        user = Member.objects.create_user(**validated_data)
-        return user
 
 class PolicySerializer(serializers.ModelSerializer):
     class Meta:

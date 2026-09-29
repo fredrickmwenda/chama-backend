@@ -24,7 +24,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     
     # Auth
-    path('api/auth/', include('apps.users.urls')),
+    path('api/', include('apps.users.urls')),
     
     # Modules
     path('api/savings/', include('apps.savings.urls')),
